@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HLS Stream Player - Watch Any Video</title>
+  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/player/hls-player.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">🎬</span>
+        <span class="logo-text">HLS Stream Player</span>
+      </div>
+      <div class="header-actions">
+        <button id="history-btn" class="btn btn-ghost" title="History">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </button>
+        <button id="theme-btn" class="btn btn-ghost" title="Toggle Theme">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- Input Section -->
+      <section id="input-section" class="section input-section">
+        <div class="input-container">
+          <h1 class="title">Watch Any Video</h1>
+          <p class="subtitle">Paste a direct video link (MKV, MP4, AVI, etc.) and stream it instantly</p>
+          
+          <form id="url-form" class="url-form">
+            <div class="input-wrapper">
+              <input 
+                type="url" 
+                id="video-url" 
+                class="url-input" 
+                placeholder="https://example.com/movie.mkv"
+                required
+                autocomplete="off"
+              >
+              <button type="submit" class="btn btn-primary" id="submit-btn">
+                <span class="btn-text">Stream</span>
+                <svg class="btn-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+              </button>
+            </div>
+          </form>
+
+          <!-- Supported Formats -->
+          <div class="formats-info">
+            <span class="formats-label">Supported:</span>
+            <span class="format-badge">MKV</span>
+            <span class="format-badge">MP4</span>
+            <span class="format-badge">AVI</span>
+            <span class="format-badge">WebM</span>
+            <span class="format-badge">MOV</span>
+          </div>
+
+          <!-- Quick Examples -->
+          <div class="examples">
+            <p class="examples-title">Or try a sample:</p>
+            <div class="example-links">
+              <button class="example-link" data-url="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8">
+                Sample HLS Stream
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Processing Section -->
+      <section id="processing-section" class="section processing-section hidden">
+        <div class="processing-container">
+          <div class="processing-header">
+            <h2 class="processing-title">Preparing Your Video</h2>
+            <button id="cancel-btn" class="btn btn-ghost btn-sm">Cancel</button>
+          </div>
+
+          <!-- File Info -->
+          <div id="file-info" class="file-info hidden">
+            <div class="file-name" id="file-name"></div>
+            <div class="file-meta" id="file-meta"></div>
+          </div>
+
+          <!-- Progress Steps -->
+          <div class="progress-steps">
+            <!-- Step 1: Analyzing -->
+            <div class="progress-step" id="step-analyze">
+              <div class="step-indicator">
+                <div class="step-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                </div>
+                <div class="step-spinner hidden"></div>
+                <div class="step-check hidden">✓</div>
+              </div>
+              <div class="step-content">
+                <div class="step-title">Analyzing</div>
+                <div class="step-desc">Checking video source...</div>
+              </div>
+            </div>
+
+            <!-- Step 2: Downloading -->
+            <div class="progress-step" id="step-download">
+              <div class="step-indicator">
+                <div class="step-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                </div>
+                <div class="step-spinner hidden"></div>
+                <div class="step-check hidden">✓</div>
+              </div>
+              <div class="step-content">
+                <div class="step-title">Downloading</div>
+                <div class="step-desc">Waiting...</div>
+                <div class="step-progress hidden">
+                  <div class="progress-bar">
+                    <div class="progress-fill" id="download-progress"></div>
+                  </div>
+                  <span class="progress-text" id="download-text">0%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 3: Converting -->
+            <div class="progress-step" id="step-convert">
+              <div class="step-indicator">
+                <div class="step-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="16 3 21 3 21 8"></polyline>
+                    <line x1="4" y1="20" x2="21" y2="3"></line>
+                    <polyline points="21 16 21 21 16 21"></polyline>
+                    <line x1="15" y1="15" x2="21" y2="21"></line>
+                    <line x1="4" y1="4" x2="9" y2="9"></line>
+                  </svg>
+                </div>
+                <div class="step-spinner hidden"></div>
+                <div class="step-check hidden">✓</div>
+              </div>
+              <div class="step-content">
+                <div class="step-title">Converting</div>
+                <div class="step-desc">Waiting...</div>
+                <div class="step-progress hidden">
+                  <div class="progress-bar">
+                    <div class="progress-fill" id="convert-progress"></div>
+                  </div>
+                  <span class="progress-text" id="convert-text">0%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 4: Ready -->
+            <div class="progress-step" id="step-ready">
+              <div class="step-indicator">
+                <div class="step-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                  </svg>
+                </div>
+                <div class="step-spinner hidden"></div>
+                <div class="step-check hidden">✓</div>
+              </div>
+              <div class="step-content">
+                <div class="step-title">Ready</div>
+                <div class="step-desc">Waiting...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Player Section -->
+      <section id="player-section" class="section player-section hidden">
+        <div class="player-wrapper">
+          <!-- Video Player Container -->
+          <div id="player-container" class="player-container"></div>
+          
+          <!-- Video Info Bar -->
+          <div class="video-info-bar">
+            <div class="video-title" id="video-title">Video Title</div>
+            <div class="video-actions">
+              <button id="new-video-btn" class="btn btn-ghost btn-sm">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                New Video
+              </button>
+              <button id="copy-link-btn" class="btn btn-ghost btn-sm">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                </svg>
+                Copy Stream Link
+              </button>
+            </div>
+          </div>
+
+          <!-- Stream Info -->
+          <div class="stream-info" id="stream-info">
+            <div class="info-grid">
+              <div class="info-item">
+                <span class="info-label">Duration</span>
+                <span class="info-value" id="info-duration">--:--</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Resolution</span>
+                <span class="info-value" id="info-resolution">--</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Audio Tracks</span>
+                <span class="info-value" id="info-audio-tracks">--</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Format</span>
+                <span class="info-value" id="info-format">HLS</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- History Modal -->
+    <div id="history-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Watch History</h3>
+          <button class="modal-close" id="close-history">×</button>
+        </div>
+        <div class="modal-body">
+          <div id="history-list" class="history-list">
+            <p class="empty-state">No history yet</p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="clear-history" class="btn btn-ghost btn-sm">Clear All</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.12"></script>
+  <script src="/player/hls-player.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
