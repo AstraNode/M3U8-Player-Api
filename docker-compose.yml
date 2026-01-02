@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  # ==========================================================================
+  # HLS Player API Service
+  # ==========================================================================
+  hls-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hls-player-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-10gb}
+    volumes:
+      # Output directory for converted HLS files
+      - hls_output:/app/output
+      # Input directory for source files (optional)
+      - hls_input:/app/input
+      # Logs
+      - ./logs:/app/logs
+    networks:
+      - hls-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 512M
+
+  # ==========================================================================
+  # Nginx Reverse Proxy (Optional - for production)
+  # ==========================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: hls-nginx
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - hls_output:/var/www/hls:ro
+    depends_on:
+      - hls-api
+    networks:
+      - hls-network
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# ==========================================================================
+# Networks
+# ==========================================================================
+networks:
+  hls-network:
+    driver: bridge
+
+# ==========================================================================
+# Volumes
+# ==========================================================================
+volumes:
+  hls_output:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${OUTPUT_PATH:-./output}
+  hls_input:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${INPUT_PATH:-./input}
