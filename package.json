@@ -1,13 +1,12 @@
 {
   "name": "hls-player-api",
   "version": "1.0.0",
-  "description": "HLS Multi-Audio Video Player API",
+  "description": "HLS Multi-Audio Video Player API with Direct URL Streaming",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon --inspect=0.0.0.0:9229 src/server.js",
     "docker:build": "docker build -t hls-player-api .",
-    "docker:run": "docker run -p 3000:3000 -v $(pwd)/output:/app/output hls-player-api",
     "docker:dev": "docker-compose -f docker-compose.dev.yml up --build",
     "docker:prod": "docker-compose up -d --build",
     "docker:stop": "docker-compose down",
@@ -16,11 +15,10 @@
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
-    "fluent-ffmpeg": "^2.1.2",
-    "multer": "^1.4.5-lts.1",
-    "uuid": "^9.0.0",
+    "helmet": "^7.1.0",
     "morgan": "^1.10.0",
-    "helmet": "^7.1.0"
+    "fluent-ffmpeg": "^2.1.2",
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
