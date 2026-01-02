@@ -65,15 +65,27 @@ class FFmpegService {
       console.log('File duration:', totalDuration);
       console.log('Audio tracks:', audioTracks.length);
 
+      let lastReportedProgress = 0;
+
+      // Helper to report progress only if it increased
+      const reportProgress = (progress) => {
+        const clamped = Math.min(Math.max(progress, 0), 100);
+        if (clamped > lastReportedProgress) {
+          lastReportedProgress = clamped;
+          onProgress(clamped);
+        }
+      };
+
       // Step 1: Convert video stream (50% of progress)
       console.log('Converting video stream...');
       await this.convertVideoStream(inputPath, outputDir, fileInfo, totalDuration, (progress) => {
-        const videoProgress = progress * 0.5; // Video is 50% of work
+        const videoProgress = (progress / 100) * 50; // Video is 50% of work
         console.log('Video progress:', videoProgress.toFixed(2) + '%');
-        onProgress(videoProgress);
+        reportProgress(videoProgress);
       });
 
       console.log('Video conversion complete');
+      reportProgress(50); // Ensure we're at 50%
 
       // Step 2: Convert each audio stream (40% of progress)
       const audioCount = audioTracks.length;
@@ -83,19 +95,21 @@ class FFmpegService {
         
         await this.convertAudioStream(inputPath, outputDir, track, totalDuration, (progress) => {
           const baseProgress = 50; // Video is done
-          const audioProgress = (i / audioCount) * 40; // Previous tracks
-          const currentProgress = (progress / audioCount) * 40; // Current track
-          const totalProgress = baseProgress + audioProgress + currentProgress;
+          const audioProgressPerTrack = 40 / audioCount; // Each track's share
+          const previousTracksProgress = i * audioProgressPerTrack; // Previous tracks
+          const currentProgress = (progress / 100) * audioProgressPerTrack; // Current track
+          const totalProgress = baseProgress + previousTracksProgress + currentProgress;
           console.log(`Audio ${i + 1} progress:`, totalProgress.toFixed(2) + '%');
-          onProgress(totalProgress);
+          reportProgress(totalProgress);
         });
 
         console.log(`Audio track ${i + 1} complete`);
+        reportProgress(50 + ((i + 1) / audioCount) * 40); // Ensure we mark this track complete
       }
 
       // Step 3: Generate master playlist (remaining 10%)
       console.log('Generating master playlist...');
-      onProgress(90);
+      reportProgress(90);
 
       const masterPlaylist = playlistGenerator.generateMaster({
         videoPlaylist: 'video.m3u8',
@@ -108,7 +122,7 @@ class FFmpegService {
 
       fs.writeFileSync(path.join(outputDir, 'master.m3u8'), masterPlaylist);
 
-      onProgress(100);
+      reportProgress(100);
       console.log('HLS conversion complete!');
 
       return {
@@ -130,6 +144,8 @@ class FFmpegService {
       );
 
       console.log('Video needs re-encoding:', needsReencode);
+
+      let lastPercent = 0;
 
       let command = ffmpeg(inputPath)
         .outputOptions([
@@ -167,21 +183,28 @@ class FFmpegService {
         })
         .on('progress', (progress) => {
           // Calculate percentage based on timemark and duration
+          let percent = 0;
+          
           if (progress.timemark && totalDuration > 0) {
             const timeParts = progress.timemark.split(':');
             const seconds = parseInt(timeParts[0]) * 3600 + 
                           parseInt(timeParts[1]) * 60 + 
                           parseFloat(timeParts[2]);
-            const percent = (seconds / totalDuration) * 100;
-            onProgress(Math.min(percent, 100));
+            percent = Math.min((seconds / totalDuration) * 100, 100);
           } else if (progress.percent) {
-            onProgress(progress.percent);
+            percent = Math.min(progress.percent, 100);
+          }
+
+          // Only report if progress increased
+          if (percent > lastPercent) {
+            lastPercent = percent;
+            onProgress(percent);
           }
         })
         .on('stderr', (stderrLine) => {
-          // Log stderr for debugging
-          if (stderrLine.includes('time=') || stderrLine.includes('frame=')) {
-            console.log('FFmpeg:', stderrLine);
+          // Log stderr for debugging (but less verbose)
+          if (stderrLine.includes('time=')) {
+            console.log('FFmpeg:', stderrLine.substring(0, 100));
           }
         })
         .on('end', () => {
@@ -203,6 +226,8 @@ class FFmpegService {
    */
   convertAudioStream(inputPath, outputDir, track, totalDuration, onProgress) {
     return new Promise((resolve, reject) => {
+      let lastPercent = 0;
+
       ffmpeg(inputPath)
         .outputOptions([
           `-map 0:a:${track.index}`,
@@ -218,25 +243,32 @@ class FFmpegService {
         ])
         .output(path.join(outputDir, `audio_${track.language}.m3u8`))
         .on('start', (commandLine) => {
-          console.log('Audio FFmpeg command:', commandLine);
+          console.log('Audio FFmpeg command:', commandLine.substring(0, 150) + '...');
         })
         .on('progress', (progress) => {
           // Calculate percentage based on timemark and duration
+          let percent = 0;
+          
           if (progress.timemark && totalDuration > 0) {
             const timeParts = progress.timemark.split(':');
             const seconds = parseInt(timeParts[0]) * 3600 + 
                           parseInt(timeParts[1]) * 60 + 
                           parseFloat(timeParts[2]);
-            const percent = (seconds / totalDuration) * 100;
-            onProgress(Math.min(percent, 100));
+            percent = Math.min((seconds / totalDuration) * 100, 100);
           } else if (progress.percent) {
-            onProgress(progress.percent);
+            percent = Math.min(progress.percent, 100);
+          }
+
+          // Only report if progress increased
+          if (percent > lastPercent) {
+            lastPercent = percent;
+            onProgress(percent);
           }
         })
         .on('stderr', (stderrLine) => {
-          // Log progress lines
-          if (stderrLine.includes('time=') || stderrLine.includes('size=')) {
-            console.log('Audio FFmpeg:', stderrLine);
+          // Less verbose logging
+          if (stderrLine.includes('time=')) {
+            console.log('Audio FFmpeg:', stderrLine.substring(0, 100));
           }
         })
         .on('end', () => {
