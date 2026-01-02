@@ -53,52 +53,83 @@ class FFmpegService {
    * Convert to HLS with multiple audio tracks
    */
   async convertToHLS({ inputPath, outputDir, audioTracks, onProgress }) {
-    // Ensure output directory exists
-    fs.mkdirSync(outputDir, { recursive: true });
+    try {
+      // Ensure output directory exists
+      fs.mkdirSync(outputDir, { recursive: true });
 
-    // Get file info for video codec check
-    const fileInfo = await this.probeFile(inputPath);
+      // Get file info for video codec check
+      const fileInfo = await this.probeFile(inputPath);
+      const totalDuration = fileInfo.duration || 0;
 
-    // Step 1: Convert video stream
-    await this.convertVideoStream(inputPath, outputDir, fileInfo, (progress) => {
-      onProgress(progress * 0.5); // Video is 50% of work
-    });
+      console.log('Starting HLS conversion...');
+      console.log('File duration:', totalDuration);
+      console.log('Audio tracks:', audioTracks.length);
 
-    // Step 2: Convert each audio stream
-    const audioCount = audioTracks.length;
-    for (let i = 0; i < audioCount; i++) {
-      const track = audioTracks[i];
-      await this.convertAudioStream(inputPath, outputDir, track);
-      onProgress(50 + ((i + 1) / audioCount) * 40); // Audio is 40% of work
+      // Step 1: Convert video stream (50% of progress)
+      console.log('Converting video stream...');
+      await this.convertVideoStream(inputPath, outputDir, fileInfo, totalDuration, (progress) => {
+        const videoProgress = progress * 0.5; // Video is 50% of work
+        console.log('Video progress:', videoProgress.toFixed(2) + '%');
+        onProgress(videoProgress);
+      });
+
+      console.log('Video conversion complete');
+
+      // Step 2: Convert each audio stream (40% of progress)
+      const audioCount = audioTracks.length;
+      for (let i = 0; i < audioCount; i++) {
+        const track = audioTracks[i];
+        console.log(`Converting audio track ${i + 1}/${audioCount}: ${track.language}`);
+        
+        await this.convertAudioStream(inputPath, outputDir, track, totalDuration, (progress) => {
+          const baseProgress = 50; // Video is done
+          const audioProgress = (i / audioCount) * 40; // Previous tracks
+          const currentProgress = (progress / audioCount) * 40; // Current track
+          const totalProgress = baseProgress + audioProgress + currentProgress;
+          console.log(`Audio ${i + 1} progress:`, totalProgress.toFixed(2) + '%');
+          onProgress(totalProgress);
+        });
+
+        console.log(`Audio track ${i + 1} complete`);
+      }
+
+      // Step 3: Generate master playlist (remaining 10%)
+      console.log('Generating master playlist...');
+      onProgress(90);
+
+      const masterPlaylist = playlistGenerator.generateMaster({
+        videoPlaylist: 'video.m3u8',
+        audioTracks,
+        resolution: fileInfo.video[0] 
+          ? `${fileInfo.video[0].width}x${fileInfo.video[0].height}` 
+          : '1920x1080',
+        bandwidth: fileInfo.video[0]?.bitrate || 4000000
+      });
+
+      fs.writeFileSync(path.join(outputDir, 'master.m3u8'), masterPlaylist);
+
+      onProgress(100);
+      console.log('HLS conversion complete!');
+
+      return {
+        masterPlaylist: path.join(outputDir, 'master.m3u8')
+      };
+    } catch (error) {
+      console.error('HLS conversion error:', error);
+      throw error;
     }
-
-    // Step 3: Generate master playlist
-    const masterPlaylist = playlistGenerator.generateMaster({
-      videoPlaylist: 'video.m3u8',
-      audioTracks,
-      resolution: fileInfo.video[0] 
-        ? `${fileInfo.video[0].width}x${fileInfo.video[0].height}` 
-        : '1920x1080',
-      bandwidth: fileInfo.video[0]?.bitrate || 4000000
-    });
-
-    fs.writeFileSync(path.join(outputDir, 'master.m3u8'), masterPlaylist);
-
-    onProgress(100);
-
-    return {
-      masterPlaylist: path.join(outputDir, 'master.m3u8')
-    };
   }
 
   /**
    * Convert video stream to HLS
    */
-  convertVideoStream(inputPath, outputDir, fileInfo, onProgress) {
+  convertVideoStream(inputPath, outputDir, fileInfo, totalDuration, onProgress) {
     return new Promise((resolve, reject) => {
       const needsReencode = !['h264', 'avc1', 'avc'].includes(
         fileInfo.video[0]?.codec?.toLowerCase() || ''
       );
+
+      console.log('Video needs re-encoding:', needsReencode);
 
       let command = ffmpeg(inputPath)
         .outputOptions([
@@ -125,18 +156,44 @@ class FFmpegService {
         ]);
       } else {
         command = command.outputOptions([
-          '-c:v copy',
-          '-bsf:v h264_mp4toannexb'
+          '-c:v copy'
         ]);
       }
 
       command
         .output(path.join(outputDir, 'video.m3u8'))
-        .on('progress', (progress) => {
-          onProgress(progress.percent || 0);
+        .on('start', (commandLine) => {
+          console.log('FFmpeg command:', commandLine);
         })
-        .on('end', resolve)
-        .on('error', reject)
+        .on('progress', (progress) => {
+          // Calculate percentage based on timemark and duration
+          if (progress.timemark && totalDuration > 0) {
+            const timeParts = progress.timemark.split(':');
+            const seconds = parseInt(timeParts[0]) * 3600 + 
+                          parseInt(timeParts[1]) * 60 + 
+                          parseFloat(timeParts[2]);
+            const percent = (seconds / totalDuration) * 100;
+            onProgress(Math.min(percent, 100));
+          } else if (progress.percent) {
+            onProgress(progress.percent);
+          }
+        })
+        .on('stderr', (stderrLine) => {
+          // Log stderr for debugging
+          if (stderrLine.includes('time=') || stderrLine.includes('frame=')) {
+            console.log('FFmpeg:', stderrLine);
+          }
+        })
+        .on('end', () => {
+          console.log('Video stream conversion finished');
+          onProgress(100);
+          resolve();
+        })
+        .on('error', (err, stdout, stderr) => {
+          console.error('Video conversion error:', err.message);
+          console.error('FFmpeg stderr:', stderr);
+          reject(new Error(`Video conversion failed: ${err.message}`));
+        })
         .run();
     });
   }
@@ -144,7 +201,7 @@ class FFmpegService {
   /**
    * Convert audio stream to HLS
    */
-  convertAudioStream(inputPath, outputDir, track) {
+  convertAudioStream(inputPath, outputDir, track, totalDuration, onProgress) {
     return new Promise((resolve, reject) => {
       ffmpeg(inputPath)
         .outputOptions([
@@ -160,8 +217,38 @@ class FFmpegService {
           `-hls_segment_filename ${path.join(outputDir, `audio_${track.language}_%04d.m4s`)}`
         ])
         .output(path.join(outputDir, `audio_${track.language}.m3u8`))
-        .on('end', resolve)
-        .on('error', reject)
+        .on('start', (commandLine) => {
+          console.log('Audio FFmpeg command:', commandLine);
+        })
+        .on('progress', (progress) => {
+          // Calculate percentage based on timemark and duration
+          if (progress.timemark && totalDuration > 0) {
+            const timeParts = progress.timemark.split(':');
+            const seconds = parseInt(timeParts[0]) * 3600 + 
+                          parseInt(timeParts[1]) * 60 + 
+                          parseFloat(timeParts[2]);
+            const percent = (seconds / totalDuration) * 100;
+            onProgress(Math.min(percent, 100));
+          } else if (progress.percent) {
+            onProgress(progress.percent);
+          }
+        })
+        .on('stderr', (stderrLine) => {
+          // Log progress lines
+          if (stderrLine.includes('time=') || stderrLine.includes('size=')) {
+            console.log('Audio FFmpeg:', stderrLine);
+          }
+        })
+        .on('end', () => {
+          console.log(`Audio track ${track.language} conversion finished`);
+          onProgress(100);
+          resolve();
+        })
+        .on('error', (err, stdout, stderr) => {
+          console.error(`Audio track ${track.language} conversion error:`, err.message);
+          console.error('FFmpeg stderr:', stderr);
+          reject(new Error(`Audio conversion failed: ${err.message}`));
+        })
         .run();
     });
   }
