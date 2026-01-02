@@ -7,9 +7,9 @@ class FFmpegService {
   /**
    * Probe file to get stream information
    */
-  async probeFile(inputUrl) {
+  async probeFile(inputPath) {
     return new Promise((resolve, reject) => {
-      ffmpeg.ffprobe(inputUrl, (err, metadata) => {
+      ffmpeg.ffprobe(inputPath, (err, metadata) => {
         if (err) {
           reject(err);
           return;
@@ -27,7 +27,7 @@ class FFmpegService {
             codec: v.codec_name,
             width: v.width,
             height: v.height,
-            fps: eval(v.r_frame_rate),
+            fps: v.r_frame_rate ? eval(v.r_frame_rate) : null,
             bitrate: v.bit_rate
           })),
           audio: audioStreams.map((a, i) => ({
@@ -50,56 +50,57 @@ class FFmpegService {
   }
 
   /**
-   * Convert MKV to HLS with multiple audio tracks
+   * Convert to HLS with multiple audio tracks
    */
-  async convertToHLS({ inputUrl, outputDir, audioTracks, onProgress, onComplete, onError }) {
-    try {
-      // Create output directory
-      fs.mkdirSync(outputDir, { recursive: true });
+  async convertToHLS({ inputPath, outputDir, audioTracks, onProgress }) {
+    // Ensure output directory exists
+    fs.mkdirSync(outputDir, { recursive: true });
 
-      // Get file info
-      const fileInfo = await this.probeFile(inputUrl);
+    // Get file info for video codec check
+    const fileInfo = await this.probeFile(inputPath);
 
-      // Step 1: Convert video stream
-      await this.convertVideoStream(inputUrl, outputDir, fileInfo, onProgress);
+    // Step 1: Convert video stream
+    await this.convertVideoStream(inputPath, outputDir, fileInfo, (progress) => {
+      onProgress(progress * 0.5); // Video is 50% of work
+    });
 
-      // Step 2: Convert each audio stream
-      for (const track of audioTracks) {
-        await this.convertAudioStream(inputUrl, outputDir, track, onProgress);
-      }
-
-      // Step 3: Generate master playlist
-      const masterPlaylist = playlistGenerator.generateMaster({
-        videoPlaylist: 'video.m3u8',
-        audioTracks,
-        resolution: `${fileInfo.video[0]?.width || 1920}x${fileInfo.video[0]?.height || 1080}`,
-        bandwidth: fileInfo.video[0]?.bitrate || 4000000
-      });
-
-      fs.writeFileSync(path.join(outputDir, 'master.m3u8'), masterPlaylist);
-
-      onComplete({
-        masterPlaylist: path.join(outputDir, 'master.m3u8'),
-        videoPlaylist: path.join(outputDir, 'video.m3u8'),
-        audioPlaylists: audioTracks.map(t => 
-          path.join(outputDir, `audio_${t.language}.m3u8`)
-        )
-      });
-    } catch (error) {
-      onError(error);
+    // Step 2: Convert each audio stream
+    const audioCount = audioTracks.length;
+    for (let i = 0; i < audioCount; i++) {
+      const track = audioTracks[i];
+      await this.convertAudioStream(inputPath, outputDir, track);
+      onProgress(50 + ((i + 1) / audioCount) * 40); // Audio is 40% of work
     }
+
+    // Step 3: Generate master playlist
+    const masterPlaylist = playlistGenerator.generateMaster({
+      videoPlaylist: 'video.m3u8',
+      audioTracks,
+      resolution: fileInfo.video[0] 
+        ? `${fileInfo.video[0].width}x${fileInfo.video[0].height}` 
+        : '1920x1080',
+      bandwidth: fileInfo.video[0]?.bitrate || 4000000
+    });
+
+    fs.writeFileSync(path.join(outputDir, 'master.m3u8'), masterPlaylist);
+
+    onProgress(100);
+
+    return {
+      masterPlaylist: path.join(outputDir, 'master.m3u8')
+    };
   }
 
   /**
    * Convert video stream to HLS
    */
-  convertVideoStream(inputUrl, outputDir, fileInfo, onProgress) {
+  convertVideoStream(inputPath, outputDir, fileInfo, onProgress) {
     return new Promise((resolve, reject) => {
-      const needsReencode = !['h264', 'avc1'].includes(
-        fileInfo.video[0]?.codec?.toLowerCase()
+      const needsReencode = !['h264', 'avc1', 'avc'].includes(
+        fileInfo.video[0]?.codec?.toLowerCase() || ''
       );
 
-      let command = ffmpeg(inputUrl)
+      let command = ffmpeg(inputPath)
         .outputOptions([
           '-map 0:v:0',
           '-f hls',
@@ -113,22 +114,26 @@ class FFmpegService {
       if (needsReencode) {
         command = command.outputOptions([
           '-c:v libx264',
-          '-preset medium',
+          '-preset fast',
           '-crf 23',
           '-profile:v high',
           '-level 4.1',
           '-g 48',
           '-keyint_min 48',
-          '-sc_threshold 0'
+          '-sc_threshold 0',
+          '-movflags +faststart'
         ]);
       } else {
-        command = command.outputOptions(['-c:v copy']);
+        command = command.outputOptions([
+          '-c:v copy',
+          '-bsf:v h264_mp4toannexb'
+        ]);
       }
 
       command
         .output(path.join(outputDir, 'video.m3u8'))
         .on('progress', (progress) => {
-          onProgress(Math.round(progress.percent * 0.5)); // Video is 50% of work
+          onProgress(progress.percent || 0);
         })
         .on('end', resolve)
         .on('error', reject)
@@ -139,9 +144,9 @@ class FFmpegService {
   /**
    * Convert audio stream to HLS
    */
-  convertAudioStream(inputUrl, outputDir, track, onProgress) {
+  convertAudioStream(inputPath, outputDir, track) {
     return new Promise((resolve, reject) => {
-      ffmpeg(inputUrl)
+      ffmpeg(inputPath)
         .outputOptions([
           `-map 0:a:${track.index}`,
           '-c:a aac',
@@ -155,10 +160,6 @@ class FFmpegService {
           `-hls_segment_filename ${path.join(outputDir, `audio_${track.language}_%04d.m4s`)}`
         ])
         .output(path.join(outputDir, `audio_${track.language}.m3u8`))
-        .on('progress', (progress) => {
-          const baseProgress = 50 + (track.index * 20);
-          onProgress(Math.min(baseProgress + (progress.percent * 0.2), 95));
-        })
         .on('end', resolve)
         .on('error', reject)
         .run();
