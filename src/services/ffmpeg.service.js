@@ -88,25 +88,29 @@ class FFmpegService {
       console.log('Video conversion complete');
       reportProgress(50); // Ensure we're at 50%
 
-      // Step 2: Convert each audio stream (40% of progress)
+      // Step 2: Convert audio streams in parallel (40% of progress)
+      console.log('Converting audio streams in parallel...');
       const audioCount = audioTracks.length;
-      for (let i = 0; i < audioCount; i++) {
-        const track = audioTracks[i];
-        console.log(`Converting audio track ${i + 1}/${audioCount}: ${track.language}`);
+      
+      // Convert all audio tracks in parallel to utilize all CPUs
+      const audioPromises = audioTracks.map((track, i) => {
+        console.log(`Starting audio track ${i + 1}/${audioCount}: ${track.language}`);
         
-        await this.convertAudioStream(inputPath, outputDir, track, totalDuration, (progress) => {
+        return this.convertAudioStream(inputPath, outputDir, track, totalDuration, (progress) => {
           const baseProgress = 50; // Video is done
-          const audioProgressPerTrack = 40 / audioCount; // Each track's share
-          const previousTracksProgress = i * audioProgressPerTrack; // Previous tracks
-          const currentProgress = (progress / 100) * audioProgressPerTrack; // Current track
-          const totalProgress = baseProgress + previousTracksProgress + currentProgress;
+          const audioProgressPerTrack = 40 / audioCount;
+          const trackProgress = (progress / 100) * audioProgressPerTrack;
+          const totalProgress = baseProgress + (i * audioProgressPerTrack) + trackProgress;
           console.log(`Audio ${i + 1} progress:`, totalProgress.toFixed(2) + '%');
           reportProgress(totalProgress);
         });
+      });
 
-        console.log(`Audio track ${i + 1} complete`);
-        reportProgress(50 + ((i + 1) / audioCount) * 40); // Ensure we mark this track complete
-      }
+      // Wait for all audio tracks to complete
+      await Promise.all(audioPromises);
+      
+      console.log('All audio tracks complete');
+      reportProgress(90);
 
       // Step 3: Generate master playlist (remaining 10%)
       console.log('Generating master playlist...');
@@ -159,6 +163,7 @@ class FFmpegService {
       let command = ffmpeg(inputPath)
         .outputOptions([
           '-map 0:v:0',
+          '-threads 40', // Use all 40 vCPUs for decoding/filtering
           '-f hls',
           '-hls_time 4',
           '-hls_playlist_type vod',
@@ -171,7 +176,7 @@ class FFmpegService {
         // Always convert to 8-bit yuv420p for maximum HLS compatibility
         command = command.outputOptions([
           '-c:v libx264',
-          '-preset ultrafast', // Much faster encoding (was 'fast')
+          '-preset veryfast', // Good balance of speed vs quality
           '-crf 23',
           '-profile:v high',
           '-level 4.1',
@@ -180,7 +185,7 @@ class FFmpegService {
           '-keyint_min 48',
           '-sc_threshold 0',
           '-movflags +faststart',
-          '-threads 0' // Use all available CPU cores
+          '-x264-params threads=40' // Force x264 to use all 40 cores
         ]);
       } else {
         command = command.outputOptions([
@@ -246,6 +251,7 @@ class FFmpegService {
           '-c:a aac',
           '-b:a 192k',
           '-ac 2',
+          '-threads 4', // Audio encoding doesn't need many threads
           '-f hls',
           '-hls_time 4',
           '-hls_playlist_type vod',
