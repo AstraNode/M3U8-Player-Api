@@ -157,19 +157,21 @@ class FFmpegService {
           '-hls_fmp4_init_filename init_video.mp4',
           `-hls_segment_filename ${path.join(outputDir, 'video_%04d.m4s')}`
         ]);
-
       if (needsReencode) {
-        command = command.outputOptions([
-          '-c:v libx264',
-          '-preset fast',
-          '-crf 23',
-          '-profile:v high',
-          '-level 4.1',
-          '-g 48',
-          '-keyint_min 48',
-          '-sc_threshold 0',
-          '-movflags +faststart'
-        ]);
+  // Always convert to 8-bit yuv420p for maximum HLS compatibility
+  command = command.outputOptions([
+    '-c:v libx264',
+    '-preset fast',
+    '-crf 23',
+    '-profile:v high',
+    '-level 4.1',
+    '-pix_fmt yuv420p', // Force 8-bit for compatibility
+    '-g 48',
+    '-keyint_min 48',
+    '-sc_threshold 0',
+    '-movflags +faststart'
+  ]);
+      }
       } else {
         command = command.outputOptions([
           '-c:v copy'
