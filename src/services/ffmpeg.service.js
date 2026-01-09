@@ -127,11 +127,27 @@ class FFmpegService {
 
       fs.writeFileSync(path.join(outputDir, 'master.m3u8'), masterPlaylist);
 
+      // Verify all files were created
+      console.log('\n=== Generated Files ===');
+      const files = fs.readdirSync(outputDir);
+      files.forEach(file => {
+        const stats = fs.statSync(path.join(outputDir, file));
+        console.log(`${file}: ${stats.size} bytes`);
+      });
+      console.log('======================\n');
+
       reportProgress(100);
       console.log('HLS conversion complete!');
 
+      // Final verification
+      const masterPath = path.join(outputDir, 'master.m3u8');
+      const masterContent = fs.readFileSync(masterPath, 'utf8');
+      console.log('\n=== Master Playlist ===');
+      console.log(masterContent);
+      console.log('=======================\n');
+
       return {
-        masterPlaylist: path.join(outputDir, 'master.m3u8')
+        masterPlaylist: masterPath
       };
     } catch (error) {
       console.error('HLS conversion error:', error);
@@ -219,18 +235,33 @@ class FFmpegService {
           }
         })
         .on('stderr', (stderrLine) => {
-          // Log stderr for debugging (but less verbose)
-          if (stderrLine.includes('time=')) {
-            console.log('FFmpeg:', stderrLine.substring(0, 100));
-          }
+          // Log important stderr messages
+          console.log('FFmpeg:', stderrLine);
         })
         .on('end', () => {
           console.log('Video stream conversion finished');
+          
+          // Verify output files exist
+          const videoPlaylist = path.join(outputDir, 'video.m3u8');
+          const initFile = path.join(outputDir, 'init_video.mp4');
+          
+          if (!fs.existsSync(videoPlaylist)) {
+            reject(new Error('Video playlist was not created'));
+            return;
+          }
+          
+          if (!fs.existsSync(initFile)) {
+            reject(new Error('Video init segment was not created'));
+            return;
+          }
+          
+          console.log('Video files verified successfully');
           onProgress(100);
           resolve();
         })
         .on('error', (err, stdout, stderr) => {
           console.error('Video conversion error:', err.message);
+          console.error('FFmpeg stdout:', stdout);
           console.error('FFmpeg stderr:', stderr);
           reject(new Error(`Video conversion failed: ${err.message}`));
         })
@@ -250,7 +281,8 @@ class FFmpegService {
           `-map 0:a:${track.index}`,
           '-c:a aac',
           '-b:a 192k',
-          '-ac 2',
+          '-ac 2', // Stereo
+          '-ar 48000', // Sample rate
           '-threads 4', // Audio encoding doesn't need many threads
           '-f hls',
           '-hls_time 4',
@@ -284,13 +316,27 @@ class FFmpegService {
           }
         })
         .on('stderr', (stderrLine) => {
-          // Less verbose logging
-          if (stderrLine.includes('time=')) {
-            console.log('Audio FFmpeg:', stderrLine.substring(0, 100));
-          }
+          // Log important stderr messages
+          console.log('Audio FFmpeg:', stderrLine);
         })
         .on('end', () => {
           console.log(`Audio track ${track.language} conversion finished`);
+          
+          // Verify output files exist
+          const audioPlaylist = path.join(outputDir, `audio_${track.language}.m3u8`);
+          const initFile = path.join(outputDir, `init_audio_${track.language}.mp4`);
+          
+          if (!fs.existsSync(audioPlaylist)) {
+            reject(new Error(`Audio playlist for ${track.language} was not created`));
+            return;
+          }
+          
+          if (!fs.existsSync(initFile)) {
+            reject(new Error(`Audio init segment for ${track.language} was not created`));
+            return;
+          }
+          
+          console.log(`Audio track ${track.language} files verified successfully`);
           onProgress(100);
           resolve();
         })
