@@ -140,10 +140,18 @@ class FFmpegService {
    */
   convertVideoStream(inputPath, outputDir, fileInfo, totalDuration, onProgress) {
     return new Promise((resolve, reject) => {
-      const needsReencode = !['h264', 'avc1', 'avc'].includes(
-        fileInfo.video[0]?.codec?.toLowerCase() || ''
-      );
+      // Check if video needs re-encoding
+      const videoCodec = fileInfo.video[0]?.codec?.toLowerCase() || '';
+      const pixFmt = fileInfo.video[0]?.pix_fmt || '';
+      
+      // Can copy if it's already H.264 and 8-bit
+      const canCopy = ['h264', 'avc1', 'avc'].includes(videoCodec) && 
+                      !pixFmt.includes('10'); // Not 10-bit
+      
+      const needsReencode = !canCopy;
 
+      console.log('Video codec:', videoCodec);
+      console.log('Pixel format:', pixFmt);
       console.log('Video needs re-encoding:', needsReencode);
 
       let lastPercent = 0;
@@ -163,7 +171,7 @@ class FFmpegService {
         // Always convert to 8-bit yuv420p for maximum HLS compatibility
         command = command.outputOptions([
           '-c:v libx264',
-          '-preset fast',
+          '-preset ultrafast', // Much faster encoding (was 'fast')
           '-crf 23',
           '-profile:v high',
           '-level 4.1',
@@ -171,7 +179,8 @@ class FFmpegService {
           '-g 48',
           '-keyint_min 48',
           '-sc_threshold 0',
-          '-movflags +faststart'
+          '-movflags +faststart',
+          '-threads 0' // Use all available CPU cores
         ]);
       } else {
         command = command.outputOptions([
