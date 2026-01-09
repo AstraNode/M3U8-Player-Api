@@ -229,6 +229,21 @@ class FFmpegService {
         fs.rmSync(workDir, { recursive: true, force: true });
       }
 
+      // Verify all files were created
+      console.log('\n=== Generated Files ===');
+      const files = fs.readdirSync(outputDir);
+      files.forEach(file => {
+        const stats = fs.statSync(path.join(outputDir, file));
+        console.log(`${file}: ${stats.size} bytes`);
+      });
+      console.log('======================\n');
+
+      // Debug: Show master playlist content
+      const masterContent = fs.readFileSync(path.join(outputDir, 'master.m3u8'), 'utf8');
+      console.log('=== Master Playlist ===');
+      console.log(masterContent);
+      console.log('=======================\n');
+
       reportProgress(100);
       
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -323,11 +338,27 @@ class FFmpegService {
         })
         .on('end', () => {
           console.log('\n✓ Video stream complete');
+          
+          // Verify output files
+          const videoPlaylist = path.join(outputDir, 'video.m3u8');
+          const initFile = path.join(outputDir, 'init_video.mp4');
+          
+          if (!fs.existsSync(videoPlaylist)) {
+            reject(new Error('Video playlist was not created'));
+            return;
+          }
+          
+          if (!fs.existsSync(initFile)) {
+            reject(new Error('Video init segment was not created'));
+            return;
+          }
+          
           onProgress(100);
           resolve();
         })
         .on('error', (err, stdout, stderr) => {
           console.error('\n✗ Video conversion error:', err.message);
+          console.error('FFmpeg stderr:', stderr);
           reject(new Error(`Video conversion failed: ${err.message}`));
         })
         .run();
@@ -418,6 +449,21 @@ class FFmpegService {
         })
         .on('end', () => {
           console.log(`✓ Audio ${track.language} complete`);
+          
+          // Verify output files
+          const audioPlaylist = path.join(outputDir, `audio_${safeLanguage}.m3u8`);
+          const initFile = path.join(outputDir, `init_audio_${safeLanguage}.mp4`);
+          
+          if (!fs.existsSync(audioPlaylist)) {
+            reject(new Error(`Audio playlist for ${track.language} was not created`));
+            return;
+          }
+          
+          if (!fs.existsSync(initFile)) {
+            reject(new Error(`Audio init segment for ${track.language} was not created`));
+            return;
+          }
+          
           onProgress(100);
           resolve();
         })
